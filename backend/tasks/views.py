@@ -24,7 +24,15 @@ class TaskViewSet(ModelViewSet):
         return Task.objects.filter(user=self.request.user)  # Show only user's tasks
 
     def perform_create(self, serializer):
-        serializer.save(user=self.request.user)  # Assign task to logged-in user
+        """Ensure required fields are set properly"""
+        serializer.save(
+            user=self.request.user,
+            status=self.request.data.get('status', 'To Do'),  
+            priority=self.request.data.get('priority', 'Medium'),
+            completed=self.request.data.get('completed', False),
+            description=self.request.data.get('description', ''),  # Default empty
+            due_date=self.request.data.get('due_date', None)  # Default to None
+        )
 
     def update(self, request, *args, **kwargs):
         """Handle task updates, including status changes"""
