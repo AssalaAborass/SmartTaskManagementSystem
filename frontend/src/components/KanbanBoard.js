@@ -502,9 +502,9 @@ const KanbanBoard = () => {
                             label="Title" 
                             value={title} 
                             onChange={(e) => setTitle(e.target.value)} 
-                            InputLabelProps={{ shrink: true }} // ✅ Ensures label always stays above input
+                            InputLabelProps={{ shrink: true }} // Ensures label always stays above input
                             variant="outlined"
-                            sx={{ mt: 1 }} // ✅ Adds spacing between title and first input
+                            sx={{ mt: 1 }} // Adds spacing between title and first input
                         />
                         <TextField 
                             fullWidth 
@@ -512,7 +512,7 @@ const KanbanBoard = () => {
                             value={description} 
                             onChange={(e) => setDescription(e.target.value)} 
                             multiline
-                            rows={3} // ✅ Prevents text area from expanding too much
+                            rows={3} // Prevents text area from expanding too much
                             InputLabelProps={{ shrink: true }} 
                             variant="outlined"
                         />
