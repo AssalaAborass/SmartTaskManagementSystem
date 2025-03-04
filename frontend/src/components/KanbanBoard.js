@@ -4,6 +4,8 @@ import { Box, Typography, Paper, List, ListItem, TextField, MenuItem, Button, Ic
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import AITaskGenerator from "./AITaskGenerator";
+
 
 const KanbanBoard = () => {
     const [tasks, setTasks] = useState([]);
@@ -160,6 +162,11 @@ const KanbanBoard = () => {
         window.location.reload();       // Refresh the page to go back to login
     }
 
+    const handleAITaskGenerated = (task) => {
+        setTasks([...tasks, task]);
+    };
+    
+
     return (
         <Box sx={{ backgroundColor: "#FFE4C4", minHeight: "100vh", p: 3 }}>
             {/* Logout Button */}
@@ -255,9 +262,12 @@ const KanbanBoard = () => {
             {/* Error Message */}
             {error && <Alert severity="error">{error}</Alert>}
 
+            {/* AI Task Generator */}
+            <AITaskGenerator onTaskGenerated={handleAITaskGenerated} />
+
             {/* Task Board with Drag & Drop */}
             <DragDropContext onDragEnd={onDragEnd}>
-                <Box display="flex" justifyContent="space-between">
+                <Box mt={3} display="flex" justifyContent="space-between">
                     {["To Do", "In Progress", "Completed"].map((status) => (
                         <Droppable droppableId={status} key={status}>
                             {(provided) => (

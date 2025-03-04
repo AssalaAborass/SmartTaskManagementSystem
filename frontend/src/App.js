@@ -12,7 +12,7 @@
 
 
 import React, { useState, useEffect } from "react";
-import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from "react-router-dom";
 import HomePage from "./components/HomePage";
 import Login from "./components/Login";
 import KanbanBoard from "./components/KanbanBoard";
@@ -22,10 +22,11 @@ const App = () => {
 
     useEffect(() => {
         const storedToken = localStorage.getItem("token");
-        setToken(storedToken);
-        console.log("Stored Token: ", storedToken);
-    }, []); 
-    
+        if (storedToken) {
+            setToken(storedToken);
+        }
+    }, []);
+
     return (
         <Router>
             <Routes>
@@ -38,3 +39,4 @@ const App = () => {
 };
 
 export default App;
+
