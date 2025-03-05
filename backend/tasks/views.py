@@ -141,7 +141,7 @@ def extract_due_date(text):
             print("Extracted relative weekday date:", next_date)
             return next_date
 
-    # 4️⃣ **Fallback: General date extraction using dateparser**
+    # Fallback: General date extraction using dateparser
     parsed_date = dateparser.parse(text, settings={'PREFER_DATES_FROM': 'future'})
     if parsed_date:
         parsed_date = parsed_date.date()
@@ -172,13 +172,17 @@ def generate_task_from_description(user_input):
             json={
                 "model": "mistral",
                 "prompt": f"Today's date is {today_date}, and today is {today_day}. "
-                          f"Create a concise task with a short title and description. "
-                          f"Do NOT include any dates in the description unless explicitly mentioned. "
-                          f"Provide the due date separately in YYYY-MM-DD format. "
-                          f"Task: {user_input}"
+                        f"Create a task based on this input:\n\n"
+                        f"User input: \"{user_input}\" \n\n"
+                        f"Return the response in this format:\n"
+                        f"Title: [Short Title]\n"
+                        f"Description: [Accurate description, NO extra details]\n"
+                        f"Priority: [High, Medium, Low]\n"
+                        f"Due Date: [YYYY-MM-DD or None]\n"
             },
             stream=True
         )
+
 
         full_response = ""
         for line in response.iter_lines():
@@ -195,91 +199,61 @@ def generate_task_from_description(user_input):
 
         print("Full Ollama response:", full_response)
 
-        # Extract title, removing "Title:", "**", and "****"
-        lines = full_response.strip().split("\n")
-        title = lines[0].replace("Title:", "").strip()
-        title = re.sub(r'\*+', '', title).strip()  # Remove stars (****)
+        # Extract title
+        title_match = re.search(r"Title:\s*(.+)", full_response)
+        title = title_match.group(1).strip() if title_match else "Generated Task"
+        title = re.sub(r"\b(High|Medium|Low) Priority\b", "", title)  # Remove priority from title
+        title = re.sub(r"\bDue Date:\s*\d{4}-\d{2}-\d{2}\b", "", title)  # Remove due date from title
+        title = title.strip()
 
         # Extract description
-        description = " ".join(lines[1:4]).replace("Description:", "").strip()
+        description_match = re.search(r"Description:\s*(.*?)(?=\n\s*Priority:|\n\s*Due Date:|$)", full_response, re.DOTALL)
+        description = description_match.group(1).strip() if description_match else "No description provided."
+        description = re.sub(r"Priority:\s*(High|Medium|Low)", "", description)  # Remove priority from description
+        description = re.sub(r"Due Date:\s*\d{4}-\d{2}-\d{2}", "", description)  # Remove due date from description
+        description = description.strip()
+
+        print("Extracted Description:", description)
+
 
         # Extract due date
         due_date = extract_due_date(user_input) or extract_due_date(full_response)
 
-        # Format due date for description correction
-        formatted_due_date = format_due_date(due_date) if due_date else None
+        # Extract priority from AI response
+        priority = "Medium"  # Default
+        priority_pattern = r'\b(High|Medium|Low) Priority\b'
+        priority_match = re.search(priority_pattern, full_response, re.IGNORECASE)
+        if priority_match:
+            priority = priority_match.group(1).capitalize()
 
-        # Fix any incorrect dates in the description
-        date_pattern = r'\b\d{4}-\d{2}-\d{2}\b|\b(?:January|February|March|April|May|June|July|August|September|October|November|December) \d{1,2}, \d{4}\b'
-        if formatted_due_date:
-            description = re.sub(date_pattern, formatted_due_date, description)
+        # Enforce priority based on due date urgency
+        if due_date:
+            due_date_obj = datetime.strptime(due_date, "%Y-%m-%d").date()
+            days_until_due = (due_date_obj - datetime.today().date()).days
+
+            if days_until_due <= 2:
+                priority = "High"
+            elif days_until_due <= 5:
+                priority = "Medium"
+            else:
+                priority = "Low"
+
+
+        # Override priority if task is due within 1 day
+        if due_date:
+            due_date_obj = datetime.strptime(due_date, "%Y-%m-%d").date()
+            if (due_date_obj - datetime.today().date()).days <= 1:
+                priority = "High"
 
         return {
             "title": title,
             "description": description if description else "No description provided.",
-            "priority": "Medium",
+            "priority": priority,
             "due_date": due_date  # Correctly set the deadline
         }
 
     except Exception as e:
         return {"error": f"Server error: {str(e)}"}
-
-
-# def generate_task_from_description(user_input):
-    try:
-        today_date = datetime.today().strftime("%Y-%m-%d")  # Get today's date as YYYY-MM-DD
-        today_day = datetime.today().strftime("%A")  # Get today's day
-
-        response = requests.post(
-            "http://localhost:11434/api/generate",
-            json={
-                "model": "mistral",
-                "prompt": f"Today's date is {today_date}, and today is {today_day}. "
-                          f"Create a concise task with a short title and description. "
-                          f"Do not use formatting symbols like asterisks (****) or markdown. "
-                          f"Do not include dates in the description unless explicitly mentioned. "
-                          f"Provide the due date separately in YYYY-MM-DD format."
-                          f"Task: {user_input}"
-            },
-            stream=True
-        )
-
-        full_response = ""
-        for line in response.iter_lines():
-            if line:
-                try:
-                    parsed_json = json.loads(line.decode("utf-8"))
-                    if "response" in parsed_json:
-                        full_response += parsed_json["response"]
-                except json.JSONDecodeError:
-                    continue
-
-        if not full_response.strip():
-            return {"error": "Ollama returned an empty response"}
-
-        print("Full Ollama response:", full_response)
-
-        # Extract title, removing "Title:", "**", and "****"
-        lines = full_response.strip().split("\n")
-        title = lines[0].replace("Title:", "").strip()
-        title = re.sub(r'\*+', '', title).strip()  # Remove stars (****)
-
-        # Extract description
-        description = " ".join(lines[1:4]).replace("Description:", "").strip()
-
-        # Extract due date
-        due_date = extract_due_date(user_input) or extract_due_date(full_response)
-
-        return {
-            "title": title,
-            "description": description if description else "No description provided.",
-            "priority": "Medium",
-            "due_date": due_date  # Correctly set the deadline
-        }
-
-    except Exception as e:
-        return {"error": f"Server error: {str(e)}"}
-
 
 
 # Django API Endpoint to generate and save a task
@@ -296,12 +270,12 @@ def generate_task(request):
     if "error" in task_data:
         return Response(task_data, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    # Save generated task to database
+    # Save generated task to database with AI-suggested priority
     task = Task.objects.create(
         user=request.user,
         title=task_data["title"],
         description=task_data["description"],
-        priority=task_data["priority"],
+        priority=task_data["priority"],  # Now storing AI-generated priority
         due_date=task_data["due_date"] if task_data["due_date"] else None
     )
 
