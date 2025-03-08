@@ -20,6 +20,8 @@ const KanbanBoard = () => {
     const [filteredTasks, setFilteredTasks] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
+    const [suggestedTask, setSuggestedTask] = useState(null);
+
 
     useEffect(() => {
         fetchTasks();
@@ -165,12 +167,34 @@ const KanbanBoard = () => {
     const handleAITaskGenerated = (task) => {
         setTasks([...tasks, task]);
     };
+
+    const fetchSuggestedTask = async () => {
+        setSuggestedTask(null); // Reset previous suggestion
+        try {
+            const response = await fetch("http://127.0.0.1:8080/api/suggest-task/", {
+                method: "GET",
+                headers: {
+                    "Authorization": `Bearer ${localStorage.getItem("token")}`,
+                    "Content-Type": "application/json",
+                },
+            });
+    
+            const data = await response.json();
+            if (data.task) {
+                setSuggestedTask(data.task);
+            } else {
+                setSuggestedTask(null);
+            }
+        } catch (error) {
+            console.error("Error fetching suggested task:", error);
+        }
+    };    
     
 
     return (
         <Box sx={{ backgroundColor: "#FFE4C4", minHeight: "100vh", p: 3 }}>
-            {/* Logout Button */}
             <Box display="flex" justifyContent="space-between" alignItems={"center"}>
+                 {/* Logout Button */}
                 <Button
                     style={{ marginLeft: "auto" }}
                     variant="contained"
@@ -224,6 +248,16 @@ const KanbanBoard = () => {
                 <Button type="submit" variant="contained" sx={{ bgcolor: "#1976D2", color: "white" }}>
                     ADD TASK
                 </Button>
+
+                {/* Suggested Task */}
+                <Button
+                    variant="contained"
+                    color="primary"
+                    onClick={fetchSuggestedTask}
+                    sx={{ fontWeight: "bold", marginRight: 2 }}
+                >
+                    Suggest Task to Start
+                </Button> 
             </Box>
 
             <Box>
@@ -395,6 +429,23 @@ const KanbanBoard = () => {
                     </DialogActions>
                 </Dialog>
             )}
+            
+            {/* Suggested Task Dialog */}
+            {suggestedTask && (
+            <Paper sx={{ p: 2, mb: 2, bgcolor: "#f5f5f5", borderLeft: "5px solid #1976D2" }}>
+                <Typography variant="h6" fontWeight="bold">📌 Recommended Task</Typography>
+                <Typography><strong>Title:</strong> {suggestedTask.title}</Typography>
+                <Typography><strong>Description:</strong> {suggestedTask.description}</Typography>
+                <Typography><strong>Due Date:</strong> {suggestedTask.due_date || "No Deadline"}</Typography>
+                <Typography 
+                    fontWeight="bold" 
+                    sx={{ color: priorityColors[suggestedTask.priority] }}
+                >
+                    Priority: {suggestedTask.priority}
+                </Typography>
+            </Paper>
+            )}
+
         </Box>
     );
 };

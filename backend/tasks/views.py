@@ -281,3 +281,28 @@ def generate_task(request):
 
     serializer = TaskSerializer(task)
     return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def suggest_task(request):
+    """
+    AI-based recommendation: Suggests the most urgent task to start.
+    """
+    token = request.auth  # Extract the user's authentication token
+    tasks = Task.objects.filter(user=request.user, status="To Do").order_by("due_date", "-priority")
+
+    if not tasks.exists():
+        return Response({"message": "No tasks available to suggest."}, status=200)
+
+    # Get the most urgent and high-priority task
+    task = tasks.first()
+
+    return Response({
+        "task": {
+            "title": task.title,
+            "description": task.description,
+            "due_date": task.due_date,
+            "priority": task.priority,
+        }
+    }, status=200)
