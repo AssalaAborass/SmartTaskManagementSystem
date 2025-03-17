@@ -6,7 +6,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.viewsets import ModelViewSet
 from .models import Task
-from .serializers import TaskSerializer
+from .serializers import TaskSerializer, SubtaskSerializer
 from django.contrib.auth.models import User
 from django.conf import settings
 import openai
@@ -16,6 +16,10 @@ from datetime import datetime, timedelta
 import dateparser
 import re
 import calendar
+from django.db import models 
+from .models import Task, SubTask
+import traceback
+
 
 
 class TaskViewSet(ModelViewSet):
@@ -204,6 +208,7 @@ def generate_task_from_description(user_input):
         title = title_match.group(1).strip() if title_match else "Generated Task"
         title = re.sub(r"\b(High|Medium|Low) Priority\b", "", title)  # Remove priority from title
         title = re.sub(r"\bDue Date:\s*\d{4}-\d{2}-\d{2}\b", "", title)  # Remove due date from title
+        title = re.sub(r"\(Adjusted Date\)", "", title).strip() # Remove adjusted date
         title = title.strip()
 
         # Extract description
@@ -283,26 +288,183 @@ def generate_task(request):
     return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
+# @api_view(['GET'])
+# @permission_classes([IsAuthenticated])
+# def suggest_task(request):
+#     """
+#     AI-based recommendation: Suggests the most urgent task to start.
+#     """
+#     token = request.auth  # Extract the user's authentication token
+#     tasks = Task.objects.filter(user=request.user, status="To Do").order_by("due_date", "-priority")
+
+#     if not tasks.exists():
+#         return Response({"message": "No tasks available to suggest."}, status=200)
+
+#     # Get the most urgent and high-priority task
+#     task = tasks.first()
+
+#     return Response({
+#         "task": {
+#             "title": task.title,
+#             "description": task.description,
+#             "due_date": task.due_date,
+#             "priority": task.priority,
+#         }
+#     }, status=200)
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
-def suggest_task(request):
+def suggest_ai_task(request):
     """
-    AI-based recommendation: Suggests the most urgent task to start.
+    AI-based recommendation: Suggests the most urgent task to start and moves it to 'In Progress'.
+    Tasks are ordered by:
+    1. Priority: High > Medium > Low
+    2. Due date: Earliest first
+    3. Task creation date (if due dates are the same)
     """
-    token = request.auth  # Extract the user's authentication token
-    tasks = Task.objects.filter(user=request.user, status="To Do").order_by("due_date", "-priority")
+    tasks = Task.objects.filter(user=request.user, status="To Do").order_by(
+        models.Case(
+            models.When(priority="High", then=1),
+            models.When(priority="Medium", then=2),
+            models.When(priority="Low", then=3),
+            default=4,  # Default if something is wrong
+            output_field=models.IntegerField(),
+        ),
+        "due_date",  # Tasks with the closest due date first
+        "created_at",  # Oldest task first (FIFO)
+    )
 
     if not tasks.exists():
         return Response({"message": "No tasks available to suggest."}, status=200)
 
-    # Get the most urgent and high-priority task
+    # Get the highest priority, most urgent task
     task = tasks.first()
+
+    # Move task to "In Progress"
+    task.status = "In Progress"
+    task.save()
 
     return Response({
         "task": {
+            "id": task.id,  # ID for UI update
             "title": task.title,
             "description": task.description,
             "due_date": task.due_date,
             "priority": task.priority,
+            "status": task.status  # Ensure frontend knows the task has moved
         }
     }, status=200)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def suggest_subtasks(request, task_id):
+    """
+    AI generates up to 3 subtasks based on task description.
+    """
+    try:
+        task = Task.objects.get(id=task_id, user=request.user)
+    except Task.DoesNotExist:
+        return Response({"error": "Task not found"}, status=404)
+
+    # Send task details to AI
+    ai_response = requests.post(
+        "http://127.0.0.1:11434/api/generate",
+        json={
+            "model": "mistral",
+            "prompt": f"Break this task into up to 3 concise subtasks. Each subtask should be short and actionable:\n\n"
+                      f"Task: {task.title}\n"
+                      f"Description: {task.description}\n"
+                      f"Format:\n"
+                      f"- [Subtask 1]\n"
+                      f"- [Subtask 2]\n"
+                      f"- [Subtask 3]\n"
+        },
+        stream=True
+    )
+
+    # Concatenate AI response properly
+    full_response = ""
+    for line in ai_response.iter_lines():
+        if line:
+            try:
+                parsed_json = json.loads(line.decode("utf-8"))
+                if "response" in parsed_json:
+                    full_response += parsed_json["response"]  # Append response
+            except json.JSONDecodeError:
+                continue
+    
+    print("Full Ollama response:", full_response)
+
+    # Extract up to 3 subtasks
+    subtask_titles = re.findall(r"(?:\d+\.\s*|\-\s*)([^:]+):?", full_response)
+    subtask_titles = [title.strip(": ").strip() for title in subtask_titles[:3]]  # Remove leading symbols
+
+    # If no subtasks were extracted, return an error message.
+    if not subtask_titles:
+        print("Error: No valid subtasks extracted from AI response!")
+        return Response({"error": "No valid subtasks generated"}, status=500)
+
+    # Generate due dates
+    due_date = task.due_date  # Use the parent task's due date if available
+    today = datetime.today().date()
+
+    # Calculate the subtask due date 
+    subtask_due_dates = []
+    if due_date:
+        total_days = (due_date - today).days
+        if total_days < 1:
+            subtask_due_dates = [due_date] * len(subtask_titles)  # Due today
+        else:
+            subtask_due_dates = [
+                today + timedelta(days=(i * (total_days // len(subtask_titles))))
+                for i in range(len(subtask_titles))
+            ]
+    else :
+        subtask_due_dates = [None] * len(subtask_titles) # No due date 
+
+    # Create subtasks in DB with due dates
+    subtasks_list = []
+    for i, title in enumerate(subtask_titles):
+        subtask = SubTask.objects.create(
+            task=task, title=title.strip(), completed=False
+        )
+        subtasks_list.append({
+            "id": subtask.id,
+            "title": subtask.title,
+            "due_date": subtask_due_dates[i].isoformat() if subtask_due_dates[i] else None 
+        })
+
+    # Return updated task with subtasks
+    return Response({"subtasks": subtasks_list}, status=201)
+
+
+def generate_subtasks(task):
+    """Generates subtasks based on task complexity and due date"""
+    if not task.due_date:
+        return  # No due date, no need for subtasks
+
+    today = datetime.today().date()
+    due_date = task.due_date
+
+    total_days = (due_date - today).days
+    if total_days < 1:
+        return  # No need to split if it's due today
+
+    num_subtasks = min(total_days, 3)  # Split into 3 subtasks max
+
+    subtask_titles = [
+        "Plan & Research",
+        "Work on Main Task",
+        "Final Review & Submission"
+    ]
+
+    for i in range(num_subtasks):
+        subtask_due_date = today + timedelta(days=(i * (total_days // num_subtasks)))
+
+        Subtask.objects.create(
+            task=task,
+            title=subtask_titles[i % len(subtask_titles)],
+            due_date=subtask_due_date
+        )

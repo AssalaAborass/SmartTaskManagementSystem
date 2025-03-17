@@ -168,8 +168,31 @@ const KanbanBoard = () => {
         setTasks([...tasks, task]);
     };
 
+    // const fetchSuggestedTask = async () => {
+    //     setSuggestedTask(null); // Reset previous suggestion
+    //     try {
+    //         const response = await fetch("http://127.0.0.1:8080/api/suggest-task/", {
+    //             method: "GET",
+    //             headers: {
+    //                 "Authorization": `Bearer ${localStorage.getItem("token")}`,
+    //                 "Content-Type": "application/json",
+    //             },
+    //         });
+    
+    //         const data = await response.json();
+    //         if (data.task) {
+    //             setSuggestedTask(data.task);
+    //         } else {
+    //             setSuggestedTask(null);
+    //         }
+    //     } catch (error) {
+    //         console.error("Error fetching suggested task:", error);
+    //     }
+    // };    
+
     const fetchSuggestedTask = async () => {
         setSuggestedTask(null); // Reset previous suggestion
+    
         try {
             const response = await fetch("http://127.0.0.1:8080/api/suggest-task/", {
                 method: "GET",
@@ -182,11 +205,44 @@ const KanbanBoard = () => {
             const data = await response.json();
             if (data.task) {
                 setSuggestedTask(data.task);
+    
+                // Update task in state to reflect status change to "In Progress"
+                setTasks(prevTasks =>
+                    prevTasks.map(task =>
+                        task.id === data.task.id ? { ...task, status: "In Progress" } : task
+                    )
+                );
             } else {
                 setSuggestedTask(null);
             }
         } catch (error) {
             console.error("Error fetching suggested task:", error);
+        }
+    };
+
+    const suggestSubtasks = async (taskId) => {
+        try {
+            const response = await fetch(`http://127.0.0.1:8080/api/tasks/${taskId}/suggest-subtasks/`, {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${localStorage.getItem("token")}`,
+                    "Content-Type": "application/json",
+                },
+            });
+    
+            const data = await response.json();
+            if (response.ok) {
+                // ✅ Find the task and update its subtasks
+                setTasks(prevTasks =>
+                    prevTasks.map(task =>
+                        task.id === taskId ? { ...task, subtasks: data.subtasks } : task
+                    )
+                );
+            } else {
+                console.error("Failed to generate subtasks:", data.error);
+            }
+        } catch (error) {
+            console.error("Error fetching subtasks:", error);
         }
     };    
     
@@ -326,46 +382,70 @@ const KanbanBoard = () => {
                                                 <Draggable key={task.id} draggableId={task.id.toString()} index={idx}>
                                                     {(provided) => (
                                                         <ListItem
-                                                            ref={provided.innerRef}
-                                                            {...provided.draggableProps}
-                                                            {...provided.dragHandleProps}
-                                                            sx={{
-                                                                mb: 1,
-                                                                bgcolor: "#fff",
-                                                                p: 1,
-                                                                borderRadius: 1,
-                                                                boxShadow: 2,
-                                                                display: "flex",
-                                                                flexDirection: "column",
-                                                                border: isOverdue(task.due_date) ? "2px solid red" : "none"
-                                                            }}
+                                                        ref={provided.innerRef}
+                                                        {...provided.draggableProps}
+                                                        {...provided.dragHandleProps}
+                                                        sx={{
+                                                            mb: 1,
+                                                            bgcolor: "#fff",
+                                                            p: 1,
+                                                            borderRadius: 1,
+                                                            boxShadow: 2,
+                                                            display: "flex",
+                                                            flexDirection: "column",
+                                                            border: isOverdue(task.due_date) ? "2px solid red" : "none"
+                                                        }}
+                                                    >
+                                                        <Box display="flex" justifyContent="space-between">
+                                                            <Typography fontWeight="bold">{task.title}</Typography>
+                                                            {isOverdue(task.due_date) && (
+                                                                <WarningAmberIcon sx={{ color: "red" }} />
+                                                            )}
+                                                        </Box>
+                                                        <Typography fontSize="small">{task.description}</Typography>
+                                                        <Typography fontSize="small" color="gray">
+                                                            Due: {task.due_date || "No Deadline"}
+                                                        </Typography>
+                                                        <Typography 
+                                                            fontSize="small" 
+                                                            fontWeight="bold" 
+                                                            sx={{ color: priorityColors[task.priority] }}
                                                         >
-                                                            <Box display="flex" justifyContent="space-between">
-                                                                <Typography fontWeight="bold">{task.title}</Typography>
-                                                                {isOverdue(task.due_date) && (
-                                                                    <WarningAmberIcon sx={{ color: "red" }} />
-                                                                )}
+                                                            Priority: {task.priority}
+                                                        </Typography>
+                                                    
+                                                        {/* Add Subtasks */}
+                                                        {task.subtasks && task.subtasks.length > 0 && (
+                                                            <Box mt={1} pl={2} sx={{ borderLeft: "3px solid #1976D2", paddingLeft: 2 }}> 
+                                                                <Typography fontSize="small" fontWeight="bold">🔹 Subtasks:</Typography>
+                                                                {task.subtasks.map((subtask, index) => (
+                                                                    <Typography key={index} fontSize="small">
+                                                                    ✔ {subtask.title.replace(/^:/, "").trim()} 
+                                                                    {subtask.due_date ? ` (Due: ${subtask.due_date})` : ""}
+                                                                    </Typography>
+                                                                ))}
                                                             </Box>
-                                                            <Typography fontSize="small">{task.description}</Typography>
-                                                            <Typography fontSize="small" color="gray">
-                                                                Due: {task.due_date || "No Deadline"}
-                                                            </Typography>
-                                                            <Typography 
-                                                                fontSize="small" 
-                                                                fontWeight="bold" 
-                                                                sx={{ color: priorityColors[task.priority] }}
+                                                        )}
+                                                    
+                                                        <Box display="flex" justifyContent="flex-end">
+                                                            <IconButton onClick={() => handleEditTask(task)}>
+                                                                <EditIcon color="primary" />
+                                                            </IconButton>
+                                                            <IconButton onClick={() => confirmDeleteTask(task.id)}>
+                                                                <DeleteIcon color="error" />
+                                                            </IconButton>
+                                                            <Button 
+                                                                variant="outlined" 
+                                                                size="small" 
+                                                                sx={{ ml: 1 }}
+                                                                onClick={() => suggestSubtasks(task.id)}
                                                             >
-                                                                Priority: {task.priority}
-                                                            </Typography>
-                                                            <Box display="flex" justifyContent="flex-end">
-                                                                <IconButton onClick={() => handleEditTask(task)}>
-                                                                    <EditIcon color="primary" />
-                                                                </IconButton>
-                                                                <IconButton onClick={() => confirmDeleteTask(task.id)}>
-                                                                    <DeleteIcon color="error" />
-                                                                </IconButton>
-                                                            </Box>
-                                                        </ListItem>
+                                                                Suggest Subtasks
+                                                            </Button>
+                                                        </Box>
+
+                                                    </ListItem>
+        
                                                     )}
                                                 </Draggable>
                                             ))}
